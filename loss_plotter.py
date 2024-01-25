@@ -22,7 +22,8 @@ with open(filePath+'/'+fileName) as f:
 
 plt.figure()
 plt.plot(lossLst)
+plt.title(f"Loss of {fileName} over Epochs w/head {head}")
 plt.ylabel("Loss")
 plt.xlabel("Epoch")
-plt.savefig(fileName[0:fileName.find('.')]+"loss.png")
+plt.savefig(fileName[0:fileName.find('.log')]+"loss.png")
 

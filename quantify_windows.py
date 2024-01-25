@@ -15,7 +15,8 @@ winSize = 5
 stepFrac = 1
 
 randomSeed = random.randint(1, 100000)
-fullDs = t2Dataset(labelsLoc, postKey, 0, winSize, winSize*stepFrac, isTrain=True, split=1)
+fullDs = t2Dataset(labelsLoc, postKey, 1, winSize, winSize*stepFrac, isTrain=True, split=1)
+
 loader = DataLoader(dataset=fullDs, batch_size=1, shuffle=False)
 
 currentSysInd = 0

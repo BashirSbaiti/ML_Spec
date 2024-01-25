@@ -290,10 +290,10 @@ if __name__ == "__main__":
     ###########################
 
     verbose = True
-    questions = [1, 2, 3, 4, 5]
+    questions = [6]
     winSizes = [60]
     stepFracs = [1]
-    useDimers = False
+    useDimers = True
     # If you use dimers MUST be asking question 6
     trainTestSplit = 0.8
 
@@ -418,7 +418,7 @@ if __name__ == "__main__":
                         plt.xlabel("Window Index")
                         plt.ylabel("Misclassifications")
                         plt.title(f"Confusion by position (system {system})")
-                        plt.savefig(f"{dir}/{winSize}System{system}.png")  # plot loc of misclassified for 1 sys
+                        #plt.savefig(f"{dir}/{winSize}System{system}.png")  # plot loc of misclassified for 1 sys
                         plt.close()
 
                     plt.figure()
@@ -426,7 +426,7 @@ if __name__ == "__main__":
                     plt.xlabel("Window Index")
                     plt.ylabel("Misclassifications")
                     plt.title("Confusion by position (overall)")
-                    plt.savefig(f"{dir}/{winSize}overallbyPos.png")
+                    #plt.savefig(f"{dir}/{winSize}overallbyPos.png")
                     plt.close()
 
                     plt.figure()
@@ -434,7 +434,7 @@ if __name__ == "__main__":
                     plt.xlabel("System")
                     plt.ylabel("Misclassifications")
                     plt.title("Confusion by system")
-                    plt.savefig(f"{dir}/{winSize}overallbySys.png")
+                    #plt.savefig(f"{dir}/{winSize}overallbySys.png")
                     plt.close()
 
 

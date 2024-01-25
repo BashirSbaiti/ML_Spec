@@ -23,7 +23,7 @@ DATALOC = r"/home/jds199/NO_BACKUP/Database_nobackup/Simulated/postprocessed"
 postKey = "trim"
 rangesLoc = f"/home/bs407/2tVectors/JS1041Dataset/Ranges/winSize={winSize}stepFrac={stepFrac}/ranges_post={postKey}_winSize={winSize}.csv"
 
-lowRangeFilter = .15
+lowRangeFilter = .25
 highRangeFilter = None
 
 

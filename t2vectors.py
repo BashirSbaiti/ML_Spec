@@ -12,18 +12,13 @@ import time
 import pickle
 from sklearn.metrics import f1_score
 import argparse
+
 parser = argparse.ArgumentParser()
 parser.add_argument("label")
 args = parser.parse_args()
 RUNLABEL = args.label
 
-
-newData = False
-
-if newData:
-    DATALOC = r"/home/jds199/ML_Database/Database/Simulated/postprocessed"  # new data 8002-9042
-else:
-    DATALOC = r"/home/jds199/NO_BACKUP/Database_nobackup/Simulated/postprocessed"  # 1041
+DATALOC = "/home/bs407/2tVectors/JS9042Dataset/xData"
 
 
 def loadSystemData(name, DATALOC):
@@ -65,7 +60,7 @@ class t2Dataset(Dataset):
         minimum value and dividing by the range (max-min value)
         :param lowRangeFilter: for each system, lowRangeFilter percent of the lowest range windows will be dropped. expressed as fraction of 1.0. Set to None to remove limit.
         :param highRangeFilter: for each system, highRangeFilter percent of the highest range windows will be dropped. expressed as fraction of 1.0. Set to None to remove limit.
-        :param RANGESLOC: location of ranges dataframe csv file (output from quantify_windows.py). Set to None when range values will not be needed.
+        :param RANGESLOC: location of ranges dataframe csv file (output from generate_vectors.py).
         :param saveUsedWindows: weather to save csv file containing information about what windows were used. only has an effect
         in the event that lowRangeFilter or highRangeFilter are defined.
         """
@@ -79,7 +74,6 @@ class t2Dataset(Dataset):
         elif RANGESLOC is None and (lowRangeFilter is not None or highRangeFilter is not None):
             raise Exception("No file path was provided to ranges csv, so windows cant be cut bases on ranges. Please "
                             "run quantify_windows.py to generate the ranges csv.")
-
 
         sysinfoDf = pd.read_csv(self.LABELSLOC, index_col=0)
 
@@ -112,48 +106,43 @@ class t2Dataset(Dataset):
         else:
             self.indsSelected = self.indsSelected[int(split * len(self.indsSelected)):len(self.indsSelected)]
 
-        self.allSysNames = [f"runJS{str(i).zfill(7)}{self.POST_KEY}" for i in self.indsSelected]
+        self.sysNamesSelected = [f"runJS{str(i).zfill(7)}{self.POST_KEY}" for i in self.indsSelected]
 
-        from pathos.multiprocessing import ProcessingPool
-        start = time.perf_counter()
-        pool = ProcessingPool(nodes=20)  # TODO: autodetect available cores?
-        with pool as executor:
-            names = [f"runJS{str(i).zfill(7)}{POST_KEY}" for i in self.indsSelected]
-            print(f"beginning multiprocess at {start} sec", flush=True)
-            results = executor.map(loadSystemData, names, [DATALOC] * len(names))
-            # results ends up stacked in such a way that it is equivalent to concatenating the systems on axis 0
-            # so the shape ends up being NUM_SYSTEMS, w1, w3 without any np reshape or concat
-            results = np.array(results)
-            self.xdata = results
-            print(f"ending multiprocess after {time.perf_counter() - start} sec", flush=True)
+        # import precalculated t2 vectors
+        xDataFname = f"xData_winSize={winSize}_step={step}__{POST_KEY}.pkl"
+        fullPath = f"{DATALOC}/{xDataFname}"
 
-        # chopping up the data
-        windowSize = winSize  # windows are square
-        step = step
+        if not os.path.exists(DATALOC):
+            raise FileNotFoundError(f"DATALOC path {DATALOC} does not exist.")
 
-        self.NUM_WINDOWS = int(self.xdata.shape[1] / windowSize) ** 2
+        with open(fullPath, 'rb') as pklfile:
+            xData = pickle.load(pklfile)
 
-        # dictionary containing key = system number, value = array of vectors (vector shape t2, array shape (numslices, t2)
-        sysDict = dict()
+
+        # only retrieve systems to be part of the current (train/test) set
+        xDataSelected = {}
+        for sysName in self.sysNamesSelected:
+            xDataSelected[sysName] = xData[sysName]
+
 
         if self.RANGESLOC is not None:
-            rangesDf = pd.read_csv(self.RANGESLOC, index_col=0).loc[:, self.allSysNames]
+            rangesDf = pd.read_csv(self.RANGESLOC, index_col=0).loc[:, self.sysNamesSelected]
 
-        # cut out windows according to low and high range filters
+        # determine what windows will be used according to low and high range filters
         if lowRangeFilter is not None or highRangeFilter is not None:
             allFilterSers = []
             for sysName in rangesDf.columns:
                 rangesSer = rangesDf.loc[:, sysName]
 
                 if lowRangeFilter is not None and highRangeFilter is not None:
-                    filterSer = pd.qcut(rangesSer, [0, lowRangeFilter, 1-highRangeFilter, 1], labels=False)
+                    filterSer = pd.qcut(rangesSer, [0, lowRangeFilter, 1 - highRangeFilter, 1], labels=False)
                     filterSer.replace(2, 0, inplace=True)
 
                 elif lowRangeFilter is not None:
                     filterSer = pd.qcut(rangesSer, [0, lowRangeFilter, 1], labels=False)
 
                 elif highRangeFilter is not None:
-                    filterSer = pd.qcut(rangesSer, [0, 1-highRangeFilter, 1], labels=False)
+                    filterSer = pd.qcut(rangesSer, [0, 1 - highRangeFilter, 1], labels=False)
                     filterSer.replace(1, -1, inplace=True)
                     filterSer.replace(0, 1, inplace=True)
                     filterSer.replace(-1, 0, inplace=True)
@@ -164,46 +153,27 @@ class t2Dataset(Dataset):
         else:
             self.usedWindowsDf = None
 
+        self.NUM_WINDOWS = len(rangesDf.index)
 
-        # optimization note: this loop is actually quite fast
-        for isys, sysName in zip(range(self.xdata.shape[0]), self.allSysNames):
-            matSys = self.xdata[isys]
-            # shape = w1, w3, t2
-            winInd = 0
-            for row in range(0, matSys.shape[0] - windowSize + 1, step):
-                rstart = row
-                rstop = row + windowSize
-                for col in range(0, matSys.shape[1] - windowSize + 1, step):
-                    winInd += 1
-                    if self.usedWindowsDf is not None and self.usedWindowsDf.loc[winInd, sysName] == 0:
-                        continue  # skip pre-designated windows
-                    cstart = col
-                    cstop = col + windowSize
-                    window = matSys[rstart:rstop, cstart:cstop, :]
-                    norm = np.linalg.norm(window, ord="fro",
-                                          axis=(0, 1))  # compute frobenius norm with matrix = axis 0, 1
-                    # norm is now a 1d vector with size t2
 
-                    # I go with this simple vector normalization scheme because I don't
-                    # necessarily expect the distribution to be gaussian
-                    if normalizeVectors:
-                        vecRange = rangesDf.loc[winInd, sysName]
-                        norm = (norm - min) / vecRange
+        if self.usedWindowsDf is not None:
+            totalWins = self.usedWindowsDf.to_numpy().sum()
+        else:
+            totalWins = len(rangesDf.index)*len(rangesDf.columns)
 
-                    if isys not in sysDict.keys():
-                        sysDict[isys] = norm.reshape(1, 250) #TODO: hardcoded to num t2 steps
-                    else:
-                        sysDict[isys] = np.concatenate((sysDict[isys], norm.reshape(1, 250)), axis=0)
+        t2Timesteps = len(xDataSelected[next(iter(xDataSelected))][1])
+        x = np.zeros([totalWins, t2Timesteps], dtype=np.float16)
+
+        count = 0
+        for sysName, winDict in xDataSelected.items():
+            for winInd, t2Vec in winDict.items():
+                x[count] = t2Vec
+                count += 1
 
 
         if self.usedWindowsDf is not None and questionNum != 6 and saveUsedWindows:  # saving Df for dimer only data is generally useless (already saved when asking question 1)
-            self.usedWindowsDf.to_csv(f"usedWindows_{RUNLABEL}_train={isTrain}_rangeAlld={lowRangeFilter}-{highRangeFilter}.csv")
-
-        for count, key in enumerate(sysDict):
-            if count == 0:
-                x = sysDict[key]
-            else:
-                x = np.concatenate((x, sysDict[key]), axis=0)
+            self.usedWindowsDf.to_csv(
+                f"usedWindows_{RUNLABEL}_train={isTrain}_rangeAlld={lowRangeFilter}-{highRangeFilter}.csv")
 
         # FINAL x shape = (num training examples, t2 axis = 250)
         #                   windows per sys (self.NUM_WINDOWS) * num sys, 250
@@ -223,7 +193,7 @@ class t2Dataset(Dataset):
         this function allows us to update the dataset's labels for answering a new question without reprocessing
         all the x data
         """
-        allSysNoPostKey = [el.replace(self.POST_KEY, "") for el in self.allSysNames]
+        allSysNoPostKey = [el.replace(self.POST_KEY, "") for el in self.sysNamesSelected]
 
         labelsDf = pd.read_csv(self.LABELSLOC, index_col=0).loc[allSysNoPostKey, :]
 
@@ -256,7 +226,7 @@ class t2Dataset(Dataset):
             allouts = []
             vfCategoryDict = {}
             i = 0
-            for n in range(1, maxNumVibrations+1):
+            for n in range(1, maxNumVibrations + 1):
                 combs = itertools.combinations([1300, 800, 200], n)
                 for comb in combs:
                     vfCategoryDict[str(list(comb))] = i
@@ -297,11 +267,11 @@ class t2Dataset(Dataset):
             repeatSer = self.usedWindowsDf.sum(axis=0)
             # 1 entry for each system, tells how many times that system is in the dataset (each window)
         else:
-            repeatSer = pd.Series(dict(zip(self.allSysNames, [self.NUM_WINDOWS] * len(self.allSysNames))))
+            repeatSer = pd.Series(dict(zip(self.sysNamesSelected, [self.NUM_WINDOWS] * len(self.sysNamesSelected))))
 
         y = []
 
-        for label, sysName in zip(allouts, self.allSysNames):
+        for label, sysName in zip(allouts, self.sysNamesSelected):
             for ii in range(repeatSer[sysName]):
                 y.append(label)
 
@@ -342,10 +312,7 @@ if __name__ == "__main__":
     ####   Pytorch Zone  ######
     ###########################
 
-    if newData:
-        labelsLoc = r"/home/jds199/Projects/ML/Dist1.19Devs/labelsJS8002-9042.csv"  # 9042
-    else:
-        labelsLoc = r"/home/bs407/2tVectors/OREOS/Dist1.15Devs/JS0-1041JPCL.csv"  # 1041
+    labelsLoc = r"/home/jds199/Projects/ML/Dist1.20Devs/JS8002_9042.csv"  # 9042
 
     rangesLoc = "ASSIGNED IN LOOP"
     postKey = "trim"
@@ -357,7 +324,7 @@ if __name__ == "__main__":
     hiddenSizess = [[64]]
     trainTestSplit = 0.8
     normalizeVectors = False
-    allowedRanges = [[None, None]] if not newData else [[None, None]]  # TODO: change
+    allowedRanges = [[None, None]]
 
     totalRuns = len(questions) * len(winSizes) * len(stepFracs)
     runNum = 0
@@ -366,12 +333,9 @@ if __name__ == "__main__":
         for winSize in winSizes:
             for stepFrac in stepFracs:
 
-                if newData:
-                    rangesLoc = None
-                else:
-                    rangesLoc = f"/home/bs407/2tVectors/JS1041Dataset/Ranges/winSize={winSize}stepFrac={stepFrac}/ranges_post={postKey}_winSize={winSize}.csv"
-
                 step = int(stepFrac * winSize)
+
+                rangesLoc = f"/home/bs407/2tVectors/JS9042Dataset/Ranges/ranges_winSize={winSize}_step={step}__{postKey}.csv"
 
                 # TODO: work in train/dev/test
                 randomSeed = random.randint(1, 100000)
@@ -550,4 +514,3 @@ if __name__ == "__main__":
                 test_loader = None
                 del test_loader
                 gc.collect()
-
